@@ -16,6 +16,10 @@ import { TweetActions } from './tweet-actions';
 import { TweetStatus } from './tweet-status';
 import { TweetStats } from './tweet-stats';
 import { TweetDate } from './tweet-date';
+import { useEffect } from 'react';
+import { incrementTweetViews } from './tweet-views';
+import { CustomIcon } from '@components/ui/custom-icon'; // Import for icons
+import { formatNumber } from '@lib/types/numberFormatter'; // Corrected path
 import type { Variants } from 'framer-motion';
 import type { Tweet } from '@lib/types/tweet';
 import type { User } from '@lib/types/user';
@@ -26,6 +30,7 @@ export type TweetProps = Tweet & {
   pinned?: boolean;
   profile?: User | null;
   parentTweet?: boolean;
+  views?: number;  // Include views in the type
 };
 
 export const variants: Variants = {
@@ -49,7 +54,8 @@ export function Tweet(tweet: TweetProps): JSX.Element {
     parentTweet,
     userReplies,
     userRetweets,
-    user: tweetUserData
+    user: tweetUserData,
+    views = 0  // Default value for views in case it's not defined
   } = tweet;
 
   const { id: ownerId, name, username, verified, photoURL } = tweetUserData;
@@ -74,6 +80,18 @@ export function Tweet(tweet: TweetProps): JSX.Element {
 
   const reply = !!parent;
   const tweetIsRetweeted = userRetweets.includes(profileId ?? '');
+
+  // Increment views when the component is rendered
+  useEffect(() => {
+    if (userId && tweetId) {
+      const hasViewedTweet = localStorage.getItem(`viewed_${tweetId}_${userId}`);
+
+      if (!hasViewedTweet) {
+        incrementTweetViews(tweetId, userId);  // Increment the view count
+        localStorage.setItem(`viewed_${tweetId}_${userId}`, 'true');  // Mark as viewed
+      }
+    }
+  }, [tweetId, userId]);
 
   return (
     <motion.article
@@ -194,7 +212,9 @@ export function Tweet(tweet: TweetProps): JSX.Element {
               <p className='whitespace-pre-line break-words'>
                 {
                   <span
-                    dangerouslySetInnerHTML={{ __html: twemojiParseWithLinks(text) }}
+                    dangerouslySetInnerHTML={{
+                      __html: twemojiParseWithLinks(text)
+                    }}
                   />
                 }
               </p>
@@ -220,6 +240,11 @@ export function Tweet(tweet: TweetProps): JSX.Element {
                   openModal={!parent ? openModal : undefined}
                 />
               )}
+            </div>
+            {/* Here is where you display the views with the eye icon */}
+            <div className='flex items-center text-light-secondary dark:text-dark-secondary'>
+              <CustomIcon iconName='EyeOn' className='h-5 w-5 mr-1' />
+              <span>{formatNumber(views)} Views</span>
             </div>
           </div>
         </div>

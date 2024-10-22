@@ -307,3 +307,12 @@ export async function clearAllBookmarks(userId: string): Promise<void> {
 
   await batch.commit();
 }
+
+export async function incrementTweetViews(tweetId: string): Promise<void> {
+  const tweetRef = doc(tweetsCollection, tweetId);
+  
+  await updateDoc(tweetRef, {
+    views: increment(1), // Increment the views count by 1
+    updatedAt: serverTimestamp()
+  });
+}
