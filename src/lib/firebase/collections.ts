@@ -49,3 +49,8 @@ export function userBookmarksCollection(
 export function userStatsCollection(id: string): CollectionReference<Stats> {
   return collection(db, `users/${id}/stats`).withConverter(statsConverter);
 }
+
+
+export const postsCollection = collection(db, 'posts').withConverter(
+  tweetConverter // Or a new converter specific to posts, if necessary
+);

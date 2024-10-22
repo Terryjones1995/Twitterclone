@@ -45,21 +45,20 @@ type TweetActionsProps = Pick<Tweet, 'createdBy'> & {
   parentId?: string;
   hasImages: boolean;
   viewTweet?: boolean;
+  onDelete?: (tweetId: string) => void; // Add onDelete prop type
 };
 
 type PinModalData = Record<'title' | 'description' | 'mainBtnLabel', string>;
 
 const pinModalData: Readonly<PinModalData[]> = [
   {
-    title: 'Pin Tweet to from profile?',
-    description:
-      'This will appear at the top of your profile and replace any previously pinned Tweet.',
+    title: 'Pin Tweet to your profile?',
+    description: 'This will appear at the top of your profile and replace any previously pinned Tweet.',
     mainBtnLabel: 'Pin'
   },
   {
-    title: 'Unpin Tweet from profile?',
-    description:
-      'This will no longer appear automatically at the top of your profile.',
+    title: 'Unpin Tweet from your profile?',
+    description: 'This will no longer appear automatically at the top of your profile.',
     mainBtnLabel: 'Unpin'
   }
 ];
@@ -72,7 +71,8 @@ export function TweetActions({
   username,
   hasImages,
   viewTweet,
-  createdBy
+  createdBy,
+  onDelete // Destructure the onDelete prop
 }: TweetActionsProps): JSX.Element {
   const { user, isAdmin } = useAuth();
   const { push } = useRouter();
@@ -95,37 +95,42 @@ export function TweetActions({
   const tweetIsPinned = pinnedTweet === tweetId;
 
   const handleRemove = async (): Promise<void> => {
-    if (viewTweet)
+    if (viewTweet) {
       if (parentId) {
         const parentSnapshot = await getDoc(doc(tweetsCollection, parentId));
         if (parentSnapshot.exists()) {
           await push(`/${username}/${parentId}`, undefined, { scroll: false });
           delayScroll(200)();
           await sleep(50);
-        } else await push('/home');
-      } else await push('/home');
+        } else {
+          await push('/home');
+        }
+      } else {
+        await push('/home');
+      }
+    }
 
     await Promise.all([
-      removeTweet(tweetId),
+      removeTweet(tweetId), // Remove the tweet from Firestore
       manageTotalTweets('decrement', ownerId),
       hasImages && manageTotalPhotos('decrement', createdBy),
       parentId && manageReply('decrement', parentId)
     ]);
 
-    toast.success(
-      `${isInAdminControl ? `@${username}'s` : 'Your'} Tweet was deleted`
-    );
+    toast.success(`${isInAdminControl ? `@${username}'s` : 'Your'} Tweet was deleted`);
+
+    if (typeof onDelete === 'function') {
+      onDelete(tweetId); // Call the onDelete function if it's defined
+    } else {
+      console.error("onDelete is not a function");
+    }
 
     removeCloseModal();
   };
 
   const handlePin = async (): Promise<void> => {
     await managePinnedTweet(tweetIsPinned ? 'unpin' : 'pin', userId, tweetId);
-    toast.success(
-      `Your Tweet was ${
-        tweetIsPinned ? 'unpinned from' : 'pinned to'
-      } your profile`
-    );
+    toast.success(`Your Tweet was ${tweetIsPinned ? 'unpinned from' : 'pinned to'} your profile`);
     pinCloseModal();
   };
 
@@ -137,9 +142,7 @@ export function TweetActions({
       closeMenu();
       await manageFollow(...args);
 
-      toast.success(
-        `You ${type === 'follow' ? 'followed' : 'unfollowed'} @${username}`
-      );
+      toast.success(`You ${type === 'follow' ? 'followed' : 'unfollowed'} @${username}`);
     };
 
   const userIsFollowed = following.includes(createdBy);
@@ -159,13 +162,8 @@ export function TweetActions({
       >
         <ActionModal
           title='Delete Tweet?'
-          description={`This can’t be undone and it will be removed from ${
-            isInAdminControl ? `@${username}'s` : 'your'
-          } profile, the timeline of any accounts that follow ${
-            isInAdminControl ? `@${username}` : 'you'
-          }, and from Twitter search results.`}
-          mainBtnClassName='bg-accent-red hover:bg-accent-red/90 active:bg-accent-red/75 accent-tab
-                            focus-visible:bg-accent-red/90'
+          description={`This can’t be undone and it will be removed from ${isInAdminControl ? `@${username}'s` : 'your'} profile, the timeline of any accounts that follow ${isInAdminControl ? `@${username}` : 'you'}, and from Twitter search results.`}
+          mainBtnClassName='bg-accent-red hover:bg-accent-red/90 active:bg-accent-red/75 accent-tab focus-visible:bg-accent-red/90'
           mainBtnLabel='Delete'
           focusOnMainBtn
           action={handleRemove}
@@ -179,8 +177,7 @@ export function TweetActions({
       >
         <ActionModal
           {...currentPinModalData}
-          mainBtnClassName='bg-light-primary hover:bg-light-primary/90 active:bg-light-primary/80 dark:text-light-primary
-                            dark:bg-light-border dark:hover:bg-light-border/90 dark:active:bg-light-border/75'
+          mainBtnClassName='bg-light-primary hover:bg-light-primary/90 active:bg-light-primary/80 dark:text-light-primary dark:bg-light-border dark:hover:bg-light-border/90 dark:active:bg-light-border/75'
           focusOnMainBtn
           action={handlePin}
           closeModal={pinCloseModal}

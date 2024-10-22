@@ -1,11 +1,10 @@
 import { useRouter } from 'next/router';
 import Link from 'next/link';
-import { orderBy, query, collection } from 'firebase/firestore';
+import { query, collection, getDocs, where } from 'firebase/firestore';
 import { twemojiParse } from '@lib/twemoji';
-import { preventBubbling } from '@lib/utils';
-import { db } from '@lib/firebase/app';  // Assuming this is your firebase setup
+import { db } from '@lib/firebase/app';
 import { formatNumber } from '@lib/date';
-import { useCollection } from '@lib/hooks/useCollection';
+import { useEffect, useState } from 'react';
 import {
   TrendsLayout,
   ProtectedLayout
@@ -19,97 +18,141 @@ import { ToolTip } from '@components/ui/tooltip';
 import { HeroIcon } from '@components/ui/hero-icon';
 import type { ReactElement, ReactNode } from 'react';
 
-// Reference trendsCollection from your Firestore
-const trendsCollection = collection(db, 'trendsCollection');
+// Reference to the tweets and users collection from Firestore
+const tweetsCollection = collection(db, 'tweets');
+const usersCollection = collection(db, 'users');
 
-export default function Bookmarks(): JSX.Element {
+export default function Trends(): JSX.Element {
   const { back } = useRouter();
+  const [tweets, setTweets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Check if trendsCollection is being correctly referenced
-  console.log("Trends Collection Reference: ", trendsCollection);
+  // Fetch tweets and sort by engagement
+  useEffect(() => {
+    const fetchTweets = async () => {
+      try {
+        const querySnapshot = await getDocs(query(tweetsCollection));
+        const fetchedTweets = await Promise.all(querySnapshot.docs.map(async (doc) => {
+          const data = doc.data();
+          const userLikesCount = data.userLikes ? data.userLikes.length : 0;
+          const userRetweetsCount = data.userRetweets ? data.userRetweets.length : 0;
 
-  // Add more debugging to ensure Firestore query is working
-  const { data, error } = useCollection(
-    query(trendsCollection, orderBy('counter', 'desc'))
-  );
+          // Check if the tweet is deleted
+          if (data.isDeleted) {
+            return null; // Exclude this tweet if it is deleted
+          }
 
-  // Log the returned data or errors for troubleshooting
-  console.log("Trends data: ", data);
-  if (error) {
-    console.error("Error fetching trends: ", error);
-  }
+          // Fetch the username using the createdBy field
+          const userDoc = await getDocs(query(usersCollection, where('id', '==', data.createdBy)));
+          const userData = userDoc.docs[0]?.data();
+
+          return {
+            id: doc.id,
+            ...data,
+            userLikesCount,
+            userRetweetsCount,
+            username: userData?.username || 'Unknown User', // Set username here
+            createdAt: data.createdAt.toDate(), // Ensure this is converted from Firestore Timestamp
+          };
+        }));
+
+        // Filter out any null tweets (deleted ones)
+        const validTweets = fetchedTweets.filter(tweet => tweet !== null);
+
+        // Group tweets by date
+        const groupedTweets = validTweets.reduce((acc, tweet) => {
+          const dateKey = tweet.createdAt.toISOString().split('T')[0]; // Get date in YYYY-MM-DD format
+          if (!acc[dateKey]) {
+            acc[dateKey] = [];
+          }
+          acc[dateKey].push(tweet);
+          return acc;
+        }, {} as { [key: string]: any[] });
+
+        // Sort tweets within each day by engagement and store them in an array
+        const sortedGroupedTweets = Object.entries(groupedTweets).map(([date, tweets]) => {
+          return {
+            date,
+            tweets: tweets.sort((a, b) => {
+              const aEngagement = a.userLikesCount + a.userRetweetsCount;
+              const bEngagement = b.userLikesCount + b.userRetweetsCount;
+              return bEngagement - aEngagement; // Sort in descending order
+            }),
+          };
+        });
+
+        // Sort by date (most recent first)
+        sortedGroupedTweets.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        // Flatten the result for rendering
+        const flattenedTweets = sortedGroupedTweets.flatMap(group => group.tweets);
+
+        // Set the tweets with usernames
+        setTweets(flattenedTweets);
+      } catch (err) {
+        console.error('Error fetching tweets: ', err);
+        setError('Error fetching tweets from Firestore.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTweets();
+  }, []);
 
   return (
     <MainContainer>
-      <SEO title='Trends / Twitter' />
-      <MainHeader useActionButton title='Trends' action={back}>
+      <SEO title='Trends / Popular Tweets' />
+      <MainHeader useActionButton title='Popular Tweets' action={back}>
         <Button
-          className='dark-bg-tab group relative ml-auto  p-2 hover:bg-light-primary/10
+          className='dark-bg-tab group relative ml-auto p-2 hover:bg-light-primary/10
                      active:bg-light-primary/20 dark:hover:bg-dark-primary/10 dark:active:bg-dark-primary/20'
         >
           <HeroIcon className='h-5 w-5' iconName='Cog8ToothIcon' />
           <ToolTip tip='Settings' />
         </Button>
       </MainHeader>
+
       <div className='mx-4 space-y-6'>
-        {data && data.length > 0 ? (
-          data.map((doc) => {
-            const { text, counter, user } = doc.data();
-            const { name } = user || { name: "Unknown User" }; // Ensure user.name is handled properly
+        {/* Loading State */}
+        {loading ? (
+          <p>Loading popular tweets...</p>
+        ) : error ? (
+          <p>{error}</p>
+        ) : tweets.length > 0 ? (
+          tweets.map((tweet, index) => {
+            const { text, userLikesCount, userRetweetsCount, username, id } = tweet;
 
             return (
               <Link
-                href={''}
-                key={text}
-                className='accent-tab relative block rounded-md border bg-white px-4 py-3 duration-200 hover:shadow-md dark:border-main-background dark:bg-zinc-900'
+                href={`/${username}/status/${id}`} // Link to the specific tweet with username
+                key={id || index}
+                passHref
               >
-                <span
-                  className='flex  flex-col gap-0.5'
-                  onClick={preventBubbling()}
-                >
-                  <div className='absolute right-2 top-2 hidden'>
-                    <Button
-                      className='hover-animation group relative  p-2
-                                hover:bg-accent-blue/10 focus-visible:bg-accent-blue/20 
-                                focus-visible:!ring-accent-blue/80'
-                      onClick={preventBubbling()}
-                    >
-                      <HeroIcon
-                        className='h-5 w-5 text-light-secondary group-hover:text-accent-blue 
-                                  group-focus-visible:text-accent-blue dark:text-dark-secondary'
-                        iconName='EllipsisHorizontalIcon'
-                      />
-                      <ToolTip tip='More' />
-                    </Button>
-                  </div>
-                  <p className='text-sm text-light-secondary dark:text-dark-secondary'>
-                    Trending
-                  </p>
-                  <p className='truncate font-bold'>{text}</p>
-                  <p className='truncate text-sm text-light-secondary dark:text-dark-secondary'>
-                    Created by{' '}
-                    <span
-                      dangerouslySetInnerHTML={{ __html: twemojiParse(name) }}
-                    />
-                  </p>
-                  <p className='text-sm text-light-secondary dark:text-dark-secondary'>
-                    {`${formatNumber(counter + 1)} Tweet${
-                      counter === 0 ? '' : 's'
-                    }`}
-                  </p>
-                </span>
+                <div className='accent-tab relative block rounded-md border bg-white px-4 py-3 duration-200 hover:shadow-md dark:border-main-background dark:bg-zinc-900'>
+                  <span className='flex flex-col gap-0.5'>
+                    <p className='text-sm text-light-secondary dark:text-dark-secondary'>
+                      Popular Tweet
+                    </p>
+                    <p className='truncate font-bold'>{text}</p>
+                    <p className='text-sm text-light-secondary dark:text-dark-secondary'>
+                      {`${formatNumber(userLikesCount)} Like${userLikesCount === 1 ? '' : 's'} | ${formatNumber(userRetweetsCount)} Retweet${userRetweetsCount === 1 ? '' : 's'}`}
+                    </p>
+                  </span>
+                </div>
               </Link>
             );
           })
         ) : (
-          <p>No trending posts available at the moment.</p>
+          <p>No popular tweets available at the moment.</p>
         )}
       </div>
     </MainContainer>
   );
 }
 
-Bookmarks.getLayout = (page: ReactElement): ReactNode => (
+Trends.getLayout = (page: ReactElement): ReactNode => (
   <ProtectedLayout>
     <MainLayout>
       <TrendsLayout>{page}</TrendsLayout>
