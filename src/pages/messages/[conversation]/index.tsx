@@ -6,14 +6,15 @@ import {
   getDoc,
   query,
   serverTimestamp,
-  where
+  where,
+  WithFieldValue
 } from 'firebase/firestore';
-import * as emoji from 'node-emoji';
 import cn from 'clsx';
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { BiNavigation } from 'react-icons/bi';
 import { twemojiParseWithLinks } from '@lib/twemoji';
+import * as emoji from 'node-emoji';
 import {
   conversationsCollection,
   messagesCollection,
@@ -30,12 +31,13 @@ import { SEO } from '@components/common/seo';
 import { MainHeader } from '@components/home/main-header';
 import { Button } from '@components/ui/button';
 import { Loading } from '@components/ui/loading';
+import Modal from '@components/ui/modal';
 import type { Message } from '@lib/types/message';
 import type {
   Conversation,
   ConversationWithUser
 } from '@lib/types/conversation';
-import type { WithFieldValue } from 'firebase/firestore';
+import type { User } from '@lib/types/user';
 import type { MotionProps } from 'framer-motion';
 
 export const variants: MotionProps = {
@@ -51,41 +53,57 @@ export default function MessagePage(): JSX.Element {
   const { conversation: conversationId } = useParams();
 
   const [inputValue, setInputValue] = useState('');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const { data, loading } = useCollection(
     query(messagesCollection, where('conversationId', '==', conversationId))
   );
 
   useEffect(() => {
-    void (async (): Promise<void> => {
-      const conversationData = (
-        await getDoc(doc(conversationsCollection, conversationId as string))
-      ).data();
+    const fetchConversationData = async () => {
+      try {
+        const conversationDoc = await getDoc(
+          doc(conversationsCollection, conversationId as string)
+        );
+        const conversationData = conversationDoc.data() as Conversation | undefined;
 
-      const userData = (
-        await getDoc(
-          doc(
-            usersCollection,
-            (conversationData?.targetUserId === user?.id
-              ? conversationData?.userId
-              : conversationData?.targetUserId) as string
-          )
-        )
-      ).data();
+        if (conversationData) {
+          const otherUserId =
+            conversationData.targetUserId === user?.id
+              ? conversationData.userId
+              : conversationData.targetUserId;
 
-      if (userData)
-        setConversation({
-          ...(conversationData as Conversation),
-          user: userData
-        });
-    })().catch(() => {
-      back();
-    });
-  }, [data, conversationId, user, back]);
+          if (!otherUserId) return;
+
+          const userDoc = await getDoc(doc(usersCollection, otherUserId));
+          const userData = userDoc.exists()
+            ? (userDoc.data() as User)
+            : undefined;
+
+          if (userData) {
+            setConversation({
+              ...conversationData,
+              user: {
+                ...userData,
+                id: userDoc.id,
+                name: userData.name || "User",
+                username: userData.username || "unknown",
+                photoURL: userData.photoURL || "/assets/default-avatar.jpg"
+              },
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching conversation data:", error);
+        back();
+      }
+    };
+
+    fetchConversationData();
+  }, [conversationId, user, back]);
 
   const handleSendMessage = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
-
     if (!inputValue) return;
 
     setInputValue('');
@@ -99,108 +117,124 @@ export default function MessagePage(): JSX.Element {
     } as WithFieldValue<Omit<Message, 'id'>>);
   };
 
+  const handleDeleteConversation = () => {
+    setShowDeleteModal(true);
+  };
+
+  const confirmDelete = async () => {
+    setShowDeleteModal(false);
+    back();
+  };
+
+  const renderDateSeparator = (date: Date) => {
+    return (
+      <div className="text-center text-xs text-gray-500 my-4">
+        {date.toDateString()}
+      </div>
+    );
+  };
+
   return (
-    <main
-      className={cn(
-        'hover-animation dxl:min-h-screen flex min-h-[90dvh] w-full max-w-xl flex-col dark:border-dark-border xs:border-x'
-      )}
-    >
-      <SEO title='Messages / Twitter' />
+    <main className={cn('flex min-h-screen w-full max-w-xl flex-col bg-black text-white')}>
+      <SEO title={`Message with ${conversation?.user.name || 'User'}`} />
+
+      {/* Header with back button, name, username, and delete button */}
       <MainHeader
         useActionButton
-        title={`Message ${
-          conversation?.user.name ? `with ${conversation.user.name}` : ''
-        }`}
+        title={conversation?.user.name || 'User'}
+        subtitle={`@${conversation?.user.username || ''}`}
         action={back}
-      ></MainHeader>
+      >
+        {conversation?.user.photoURL && (
+          <a href={`/${conversation?.user.username}`} className="mr-2">
+            <img
+              src={conversation?.user.photoURL}
+              alt={`${conversation?.user.name}'s profile`}
+              className="h-8 w-8 rounded-full border-2 border-white"
+            />
+          </a>
+        )}
+        <Button
+          onClick={handleDeleteConversation}
+          className="text-red-500 ml-auto"
+        >
+          Delete Conversation
+        </Button>
+      </MainHeader>
 
       {loading ? (
         <Loading />
       ) : (
-        <div className='h-[calc(100dvh-52px)] w-full '>
-          <div
-            className='
-            relative flex h-full
-            w-full flex-col items-center
-            justify-end gap-0.5 rounded-md bg-white dark:border-main-background dark:bg-main-background'
-          >
-            <div className='with-scroll flex h-full w-full flex-col-reverse overflow-auto'>
-              <div className='mb-2 flex h-full w-full flex-col justify-end gap-2 px-2 pb-2'>
-                {data
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  ?.sort((a, b) => (a.createdAt as any) - (b.createdAt as any))
-                  .map((message) => (
-                    <motion.div
-                      className={`relative flex w-full items-end justify-start ${
-                        message.userId === user?.id
-                          ? 'flex-row-reverse'
-                          : ' flex-row'
-                      }`}
-                      key={message.id}
-                      {...variants}
-                    >
-                      <div
-                        className={`border-4 border-b-main-accent border-t-transparent 
-                          ${
-                            message.userId === user?.id
-                              ? 'rounded-r-lg border-l-main-accent border-r-transparent'
-                              : 'rounded-l-lg border-l-transparent border-r-main-accent'
-                          }
-                        `}
-                      >
-                        {message.userId !== user?.id && (
-                          <div className='absolute bottom-[1px] left-[3px] border-[3px] border-b-white border-l-transparent border-r-white border-t-transparent dark:border-b-zinc-900 dark:border-r-zinc-900'></div>
+        <div className="flex-grow overflow-y-auto p-4">
+          <div className="flex flex-col gap-4">
+            {data && data.length > 0 &&
+              data
+                .sort((a, b) => (a.createdAt as any)?.seconds - (b.createdAt as any)?.seconds)
+                .map((message, index) => {
+                  const prevMessage = data[index - 1];
+                  const isNewDay = prevMessage && new Date(prevMessage.createdAt.seconds * 1000).toDateString() !== new Date(message.createdAt.seconds * 1000).toDateString();
+
+                  return (
+                    <div key={message.id}>
+                      {isNewDay && renderDateSeparator(new Date(message.createdAt.seconds * 1000))}
+                      <motion.div
+                        {...variants}
+                        className={cn(
+                          'flex flex-col',
+                          message.userId === user?.id ? 'items-end' : 'items-start'
                         )}
-                      </div>
-                      <div
-                        className={`multiline max-w-[80%] rounded-md border border-main-accent px-2 py-1 ${
-                          message.userId === user?.id
-                            ? 'rounded-br-none bg-main-accent text-white '
-                            : 'rounded-bl-none text-main-accent '
-                        }
-                      `}
                       >
-                        <p>
-                          {
-                            <span dangerouslySetInnerHTML={{
-                                __html: twemojiParseWithLinks(message.text, 'text-white')
-                              }}
-                            />
-                          }
-                        </p>
-                      </div>
-                    </motion.div>
-                  ))}
-              </div>
-            </div>
-
-            <form
-              className='bg-red flex w-full gap-2 p-3'
-              onSubmit={handleSendMessage}
-            >
-              <input
-                className='
-                  shadow-full h-12 flex-1 rounded-full
-                  border border-gray-200 bg-transparent bg-white px-3 py-3 outline-none transition
-                  placeholder:text-light-secondary focus-within:bg-main-background focus-within:ring-2 focus-within:ring-main-accent dark:border-main-background dark:bg-zinc-900 dark:placeholder:text-dark-secondary
-                '
-                placeholder='Send a message'
-                onChange={(e): void =>
-                  setInputValue(emoji.emojify(e.target.value))
-                }
-                value={inputValue}
-              />
-
-              <Button
-                type='submit'
-                className='flex h-12 w-12 place-items-center justify-center bg-main-accent text-lg font-bold
-                        text-white outline-none transition hover:brightness-90 active:brightness-75'
-              >
-                <BiNavigation className='text-white' />
-              </Button>
-            </form>
+                        <div
+                          className={cn(
+                            'max-w-xs rounded-lg px-4 py-2',
+                            message.userId === user?.id
+                              ? 'bg-blue-500 text-white rounded-br-none'
+                              : 'bg-gray-700 text-white rounded-bl-none'
+                          )}
+                        >
+                          <span
+                            dangerouslySetInnerHTML={{
+                              __html: twemojiParseWithLinks(message.text, 'text-white'),
+                            }}
+                          />
+                        </div>
+                        <span className="text-xs text-gray-400 mt-1">
+                          {new Date(message.createdAt.seconds * 1000).toLocaleTimeString()}
+                        </span>
+                      </motion.div>
+                    </div>
+                  );
+                })}
           </div>
         </div>
+      )}
+
+      {/* Message input form */}
+      <form className="flex items-center p-4 bg-gray-900" onSubmit={handleSendMessage}>
+        <input
+          className="flex-1 bg-gray-800 text-white rounded-full px-4 py-2 outline-none"
+          placeholder="Send a message"
+          value={inputValue}
+          onChange={(e) => setInputValue(emoji.emojify(e.target.value))}
+        />
+        <Button
+          type="submit"
+          className="ml-2 bg-blue-500 text-white rounded-full p-2"
+        >
+          <BiNavigation className="text-white" />
+        </Button>
+      </form>
+
+      {/* Custom Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <Modal
+          title="Delete Conversation"
+          description="Are you sure you want to delete this conversation? This action cannot be undone."
+          onCancel={() => setShowDeleteModal(false)}
+          onConfirm={confirmDelete}
+          confirmText="Delete"
+          cancelText="Cancel"
+        />
       )}
     </main>
   );

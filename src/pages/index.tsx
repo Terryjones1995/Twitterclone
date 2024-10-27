@@ -19,7 +19,7 @@ export default function Login(): JSX.Element {
   return (
     <div className='grid h-[100dvh] grid-rows-[1fr,auto]'>
       <SEO
-        title='Twitter. It’s what’s happening'
+        title='Quinte Social. It’s what’s happening'
         description='From breaking news and entertainment to sports and politics, get the full story with all the live commentary.'
       />
       <LoginMain />

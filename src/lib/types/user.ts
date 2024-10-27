@@ -9,7 +9,8 @@ export type User = {
   accent: Accent | null;
   website: string | null;
   location: string | null;
-  username: string;
+  username: string;              // Original with capitalization
+  username_lowercase: string;     // Lowercase version for validation
   photoURL: string;
   verified: boolean;
   following: string[];

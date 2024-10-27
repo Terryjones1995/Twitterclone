@@ -74,7 +74,7 @@ export function UpdateUsername(): JSX.Element {
 
     await sleep(500);
 
-    await updateUsername(user?.id as string, inputValue);
+    await updateUsername(user?.id as string, inputValue); // Saves the original version of the username
 
     closeModal();
 

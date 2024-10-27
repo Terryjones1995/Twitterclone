@@ -21,7 +21,9 @@ import {
   tweetsCollection,
   userStatsCollection,
   userBookmarksCollection,
-  notificationsCollection
+  notificationsCollection,
+  conversationsCollection,
+  messagesCollection
 } from './collections';
 import { db, storage } from './app';
 import type { Notification } from '@lib/types/notification';
@@ -32,15 +34,29 @@ import type { FilesWithId, ImagesPreview } from '@lib/types/file';
 import type { Bookmark } from '@lib/types/bookmark';
 import type { Theme, Accent } from '@lib/types/theme';
 
-export async function checkUsernameAvailability(
-  username: string
-): Promise<boolean> {
+// Case-insensitive username availability check using a lowercase field
+export async function checkUsernameAvailability(username: string): Promise<boolean> {
+  const lowercasedUsername = username.toLowerCase();
   const { empty } = await getDocs(
-    query(usersCollection, where('username', '==', username), limit(1))
+    query(usersCollection, where('username_lowercase', '==', lowercasedUsername), limit(1))
   );
   return empty;
 }
 
+// Update username and store both the original and lowercase versions
+export async function updateUsername(userId: string, username?: string): Promise<void> {
+  const userRef = doc(usersCollection, userId);
+  if (username) {
+    const lowercasedUsername = username.toLowerCase();
+    await updateDoc(userRef, {
+      username, // Stores original version with capitalization
+      username_lowercase: lowercasedUsername, // Stores lowercase version for uniqueness
+      updatedAt: serverTimestamp()
+    });
+  }
+}
+
+// Additional utility functions
 export async function getCollectionCount<T>(
   collection: Query<T>
 ): Promise<number> {
@@ -65,17 +81,6 @@ export async function updateUserTheme(
 ): Promise<void> {
   const userRef = doc(usersCollection, userId);
   await updateDoc(userRef, { ...themeData });
-}
-
-export async function updateUsername(
-  userId: string,
-  username?: string
-): Promise<void> {
-  const userRef = doc(usersCollection, userId);
-  await updateDoc(userRef, {
-    ...(username && { username }),
-    updatedAt: serverTimestamp()
-  });
 }
 
 export async function managePinnedTweet(
@@ -308,11 +313,24 @@ export async function clearAllBookmarks(userId: string): Promise<void> {
   await batch.commit();
 }
 
-export async function incrementTweetViews(tweetId: string): Promise<void> {
-  const tweetRef = doc(tweetsCollection, tweetId);
-  
-  await updateDoc(tweetRef, {
-    views: increment(1), // Increment the views count by 1
-    updatedAt: serverTimestamp()
+// Define and export the deleteConversation function
+export async function deleteConversation(conversationId: string): Promise<void> {
+  const batch = writeBatch(db);
+
+  // Reference to the conversation document
+  const conversationRef = doc(conversationsCollection, conversationId);
+  batch.delete(conversationRef);
+
+  // Query to get all messages in the conversation
+  const messagesSnapshot = await getDocs(
+    query(messagesCollection, where('conversationId', '==', conversationId))
+  );
+
+  // Add each message to the batch delete
+  messagesSnapshot.forEach((messageDoc) => {
+    batch.delete(messageDoc.ref);
   });
+
+  // Commit the batch to apply all deletions
+  await batch.commit();
 }
